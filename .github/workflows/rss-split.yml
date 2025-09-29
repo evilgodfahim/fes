@@ -1,0 +1,31 @@
+name: Update RSS Feeds
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # every 30 mins
+  workflow_dispatch:          # allow manual run
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run feed splitter
+        run: python split_feed.py
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add bangla.xml english.xml
+          git commit -m "Update feeds" || echo "No changes to commit"
+          git push
