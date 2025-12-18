@@ -4,7 +4,7 @@ import requests
 import re
 
 # Source mixed feed
-SOURCE_URL = "https://politepol.com/fd/BNnVF6SFDNH6.xml"
+SOURCE_URL = "https://politepaul.com/fd/BNnVF6SFDNH6.xml"
 
 # Regex to detect Bangla characters
 bangla_re = re.compile(r'[\u0980-\u09FF]')
