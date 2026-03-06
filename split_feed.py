@@ -44,9 +44,6 @@ bangla_re = re.compile(r'[\u0980-\u09FF]')
 NEGATIVE_WORDS = re.compile(r'\b(' + '|'.join([
 
     # ── DEATH — unambiguous crime/atrocity terms only ────────────────────
-    # "kill" alone → too broad ("kills deal", "kills growth target")
-    # "die/dead/death" alone → too broad ("dead in the water", policy)
-    # Only unambiguous synonyms and specific compound phrases used.
     r'murder(?:ed|s|ing|er|ers)?',
     r'homicide',
     r'manslaughter',
@@ -91,11 +88,6 @@ NEGATIVE_WORDS = re.compile(r'\b(' + '|'.join([
     r'last\s+rites',
 
     # ── VIOLENT CRIME & ASSAULT ───────────────────────────────────────────
-    # REMOVED as standalone (block war/geopolitical reporting):
-    #   attack, bomb, blast, explosion, militant, insurgent,
-    #   guerrilla, paramilitary, combat, siege, hostility,
-    #   shelling, mortar, airstrike, missile, bombardment
-    # Only specific interpersonal violence compound phrases kept.
     r'maim(?:ed|s|ing)?',
     r'mutilat(?:e|ed|ion)?',
     r'disembowel(?:ed|ment)?',
@@ -153,8 +145,6 @@ NEGATIVE_WORDS = re.compile(r'\b(' + '|'.join([
     r'sexually\s+(?:abused|assaulted|harassed|exploited)',
 
     # ── FINANCIAL CRIME & CORRUPTION ─────────────────────────────────────
-    # "corrupt" alone → too broad (used in analysis, policy discourse)
-    # "fraud" → context makes it clearly criminal in news
     r'kidnap(?:ped|ping|per|pers)?',
     r'abduct(?:ed|ion|s)?',
     r'hostage(?:s)?\s+(?:taken|held|situation|crisis)',
@@ -202,10 +192,6 @@ NEGATIVE_WORDS = re.compile(r'\b(' + '|'.join([
     r'enslave(?:d|ment)?|slavery',
 
     # ── ARRESTS & LOCAL LEGAL DRAMA ───────────────────────────────────────
-    # Kept to catch BD local politician-arrested/remanded/bailed articles.
-    # "arrest" alone blocks "North Korea arrests US soldier" (international).
-    # Use "arrested for/over/by" to require a reason phrase — still catches
-    # local BD crime noise while being slightly more specific.
     r'arrest(?:ed|s|ing)?\s+(?:for|on|in|over|by|after)',
     r'remand(?:ed)?',
     r'detain(?:ed)?\s+(?:for|on|over|by)',
@@ -269,8 +255,6 @@ NEGATIVE_WORDS = re.compile(r'\b(' + '|'.join([
     r'snatching\s+(?:case|gang|incident|victim)',
 
     # ── ROAD & TRANSPORT ACCIDENTS ────────────────────────────────────────
-    # "crash" alone blocks "market crash", "stock crash", "currency crash"
-    # All patterns are specific physical accident compounds.
     r'road\s+(?:accident|crash|fatality)',
     r'highway\s+accident',
     r'bus\s+(?:accident|overturns?|plunge[sd]?|crash(?:es|ed)?|capsize)',
@@ -302,8 +286,6 @@ NEGATIVE_WORDS = re.compile(r'\b(' + '|'.join([
     r'missing\s+(?:in|after)\s+(?:river|flood|sea|storm|cyclone)',
 
     # ── GAS EXPLOSIONS & LOCAL FIRE ACCIDENTS ────────────────────────────
-    # "blast/explosion/fire" alone blocks war/industrial/policy reporting.
-    # Only local accident-specific compound phrases.
     r'gas\s+(?:burst|cylinder\s+(?:blast|burst|explosion))',
     r'gas\s+cylinder\s+(?:blast|burst|explode[sd]?)',
     r'cylinder\s+(?:blast|burst|explosion)',
@@ -427,13 +409,18 @@ def get_thumbnail(entry) -> str | None:
 def is_bangla(text: str) -> bool:
     return bool(bangla_re.search(text or ""))
 
-def is_negative(entry) -> bool:
+def get_negative_match(entry) -> str | None:
+    """Returns the matched word/phrase if negative, else None. Used for filtering + debug."""
     text = " ".join(filter(None, [
         entry.get("title", "") or "",
         entry.get("summary", "") or "",
         (entry.get("tags") or [{}])[0].get("term", ""),
     ]))
-    return bool(NEGATIVE_WORDS.search(text))
+    m = NEGATIVE_WORDS.search(text)
+    return m.group(0) if m else None
+
+def is_negative(entry) -> bool:
+    return get_negative_match(entry) is not None
 
 def get_pub_datetime(entry) -> datetime | None:
     pub = entry.get("published") or entry.get("updated")
@@ -533,7 +520,21 @@ def fetch_feed(url: str) -> list:
         resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         resp.raise_for_status()
         feed = feedparser.parse(resp.content)
-        print(f"[OK]   {url} — {len(feed.entries)} entries")
+
+        # ── DEBUG: structural sanity check ──────────────────────────────
+        print(f"[OK]   {url}")
+        print(f"       entries          : {len(feed.entries)}")
+        print(f"       feed.bozo        : {feed.bozo}"
+              + (f" ({feed.bozo_exception})" if feed.bozo else ""))
+        if feed.entries:
+            sample = feed.entries[0]
+            print(f"       sample title     : {sample.get('title', '—')!r}")
+            print(f"       sample published : {sample.get('published') or sample.get('updated') or '—'!r}")
+            print(f"       sample has encl  : {bool(sample.get('enclosures'))}")
+            print(f"       sample has media : {bool(sample.get('media_thumbnail') or sample.get('media_content'))}")
+            print(f"       sample summary   : {repr((sample.get('summary') or '')[:80])}")
+        # ────────────────────────────────────────────────────────────────
+
         return feed.entries
     except Exception as e:
         print(f"[FAIL] {url} — {e}")
@@ -543,31 +544,74 @@ def fetch_feed(url: str) -> list:
 def main():
     all_entries = []
     for url in SOURCE_URLS:
-        all_entries.extend(fetch_feed(url))
+        entries = fetch_feed(url)
+        # Tag each entry with its source URL for per-source debug later
+        for e in entries:
+            e['_source_url'] = url
+        all_entries.extend(entries)
 
-    print(f"\nTotal fetched: {len(all_entries)}")
+    print(f"\n{'='*60}")
+    print(f"Total fetched : {len(all_entries)}")
+    print(f"{'='*60}\n")
 
     bangla_new, english_new = [], []
-    skipped_neg = skipped_old = 0
+    skipped_neg = skipped_old = skipped_no_date = 0
+
+    # Per-source counters
+    source_stats: dict[str, dict] = {url: {'total': 0, 'neg': 0, 'old': 0, 'bangla': 0, 'english': 0} for url in SOURCE_URLS}
 
     for entry in all_entries:
-        if is_negative(entry):
+        src = entry.get('_source_url', 'unknown')
+        title = entry.get('title', '(no title)')
+        source_stats[src]['total'] += 1
+
+        neg_match = get_negative_match(entry)
+        if neg_match:
             skipped_neg += 1
+            source_stats[src]['neg'] += 1
+            print(f"  [NEG]  {title!r}")
+            print(f"         matched: {neg_match!r}")
             continue
+
         if is_too_old(entry):
             skipped_old += 1
+            source_stats[src]['old'] += 1
+            pub = entry.get('published') or entry.get('updated') or '(no date)'
+            dt = get_pub_datetime(entry)
+            if dt:
+                age_min = int((datetime.now(timezone.utc) - (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc))).total_seconds() / 60)
+                print(f"  [OLD]  {title!r}  [{age_min}m old]")
+            else:
+                skipped_no_date += 1
+                print(f"  [OLD?] {title!r}  [pub={pub!r}, could not parse date]")
             continue
+
         text = (entry.get("title", "") or "") + " " + (entry.get("summary", "") or "")
+        has_thumb = bool(get_thumbnail(entry))
         if is_bangla(text):
             bangla_new.append(entry)
+            source_stats[src]['bangla'] += 1
+            print(f"  [BN]   {title!r}" + (" [img]" if has_thumb else ""))
         else:
             english_new.append(entry)
+            source_stats[src]['english'] += 1
+            print(f"  [EN]   {title!r}" + (" [img]" if has_thumb else ""))
 
-    print(f"Skipped negative : {skipped_neg}")
-    print(f"Skipped too old  : {skipped_old}")
-    print(f"New Bangla       : {len(bangla_new)}")
-    print(f"New English      : {len(english_new)}")
+    print(f"\n{'='*60}")
+    print(f"SUMMARY")
+    print(f"{'='*60}")
+    for url, s in source_stats.items():
+        label = url.split('/')[-1] or url
+        print(f"  {label}")
+        print(f"    fetched   : {s['total']}")
+        print(f"    blocked   : {s['neg']} negative  |  {s['old']} too old")
+        print(f"    passed    : {s['bangla']} bangla  |  {s['english']} english")
     print()
+    print(f"  Total skipped negative : {skipped_neg}")
+    print(f"  Total skipped too old  : {skipped_old}  (of which {skipped_no_date} had no parseable date)")
+    print(f"  New Bangla             : {len(bangla_new)}")
+    print(f"  New English            : {len(english_new)}")
+    print(f"{'='*60}\n")
 
     feeds = {
         "bangla.xml":  ("Bangla News",  "Filtered positive Bangla news",  bangla_new),
