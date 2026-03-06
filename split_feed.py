@@ -75,7 +75,7 @@ NEGATIVE_WORDS = re.compile(r'\b(' + '|'.join([
     r'torment(?:ed|ing|s)?', r'humiliat(?:e|ed|ion)?',
     r'degrad(?:e|ed|ing|ation)?', r'exploit(?:ation|ed)?',
     r'enslave(?:d|ment)?', r'forced\s?labor', r'child\s?labor'
-
+]) + r')\b', re.IGNORECASE)
 
 def is_bangla(text: str) -> bool:
     return bool(bangla_re.search(text or ""))
