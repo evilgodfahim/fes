@@ -7,7 +7,7 @@ from email.utils import parsedate_to_datetime
 # --- Source feeds (list, not tuple) ---
 SOURCE_URLS = [
     "https://politepaul.com/fd/BNnVF6SFDNH6.xml",
-    "https://tbsnews.net/top-news/rss.xml",
+    "https://evilgodfahim.github.io/tbs/articles.xml",
 ]
 
 # --- Bangla character detector ---
