@@ -34,11 +34,8 @@ NEGATIVE_WORDS = re.compile(r'\b(' + '|'.join([
     r'beat(?:en|ing|s)?', r'batter(?:ed|ing|s)?',
     r'stab(?:bed|bing|s)?', r'shot', r'shoot(?:ing|ings|er|ers)?',
     r'gun(?:man|men|shot|shots|fire)?', r'shoot(?:out)?',
-    r'bomb(?:ed|ing|ings|er|ers|blast)?', r'explo(?:sion|sions|de|ded|ding)?',
-    r'blast(?:s|ed|ing)?', r'detonate(?:d|s)?', r'detonation',
     r'grenade(?:s)?', r'landmine(?:s)?', r'ied',
     r'clash(?:es|ed|ing)?', r'riot(?:s|ed|ing)?', r'violenc(?:e|es)?',
-    r'aggression', r'brutal(?:ly|ity)?', r'savage(?:ly|ry)?',
     r'vicious(?:ly)?', r'bloodshed', r'bloodbath',
 
     # Crime & law enforcement
