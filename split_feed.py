@@ -41,18 +41,6 @@ NEGATIVE_WORDS = re.compile(r'\b(' + '|'.join([
     r'aggression', r'brutal(?:ly|ity)?', r'savage(?:ly|ry)?',
     r'vicious(?:ly)?', r'bloodshed', r'bloodbath',
 
-    # War & conflict
-    r'war(?:fare|s)?', r'conflict(?:s)?', r'combat', r'battle(?:s|d)?',
-    r'siege(?:s|d)?', r'invasion(?:s)?', r'invade(?:d|s)?',
-    r'occupat(?:ion|ions)?', r'airstrike(?:s)?', r'air\s?raid(?:s)?',
-    r'ceasefire', r'coup(?:s)?', r'insurgenc(?:y|ies)',
-    r'insurgent(?:s)?', r'militia(?:s)?', r'guerrilla',
-    r'terrorism?', r'terrorist(?:s)?', r'extremis(?:m|t|ts)',
-    r'jihadist(?:s)?', r'militant(?:s)?', r'rebel(?:s|lion)?',
-    r'uprising(?:s)?', r'genocide', r'ethnic\s?cleansing',
-    r'refugee(?:s)?', r'displace(?:d|ment)?', r'fled',
-    r'evacuate(?:d|s)?', r'evacuation',
-
     # Crime & law enforcement
     r'arrest(?:ed|s|ing)?', r'detain(?:ed|s|ing|ee|ment)?',
     r'imprison(?:ed|ment)?', r'jail(?:ed|s|ing)?', r'prison(?:er|ers|s)?',
@@ -80,53 +68,13 @@ NEGATIVE_WORDS = re.compile(r'\b(' + '|'.join([
     r'abuse(?:d|s|r|rs)?', r'abusing',
     r'exploit(?:ed|ation|ation)?', r'grooming', r'pedophil(?:e|ia|es)?',
 
-    # Disaster & accidents
-    r'disaster(?:s)?', r'catastrophe(?:s)?', r'calamity',
-    r'accident(?:s)?', r'crash(?:es|ed|ing)?', r'collide(?:d|s)?',
-    r'collision(?:s)?', r'wreck(?:s|ed|ing)?', r'derail(?:ed|ment|s)?',
-    r'capsize(?:d|s)?', r'shipwreck(?:s)?', r'drown(?:ed|ing|s)?',
-    r'flood(?:s|ed|ing)?', r'earthquake(?:s)?', r'tsunami(?:s)?',
-    r'cyclone(?:s)?', r'hurricane(?:s)?', r'tornado(?:es|s)?',
-    r'wildfire(?:s)?', r'blaze(?:s|d)?', r'inferno',
-    r'collapse(?:d|s|sing)?', r'landslide(?:s)?', r'avalanche(?:s)?',
-    r'famine(?:s)?', r'drought(?:s)?', r'starv(?:e|ed|ing|ation)',
-
-    # Health crisis
-    r'epidemic(?:s)?', r'pandemic(?:s)?', r'outbreak(?:s)?',
-    r'plague(?:s)?', r'contagion', r'contaminat(?:e|ed|ion)',
-    r'poison(?:ed|ing|s)?', r'toxic(?:ity)?', r'overdos(?:e|ed|ing)?',
-    r'suicide(?:s)?', r'suicidal', r'self.harm',
-
-    # Political & economic turmoil
-    r'sanction(?:s|ed)?', r'ban(?:ned|s|ning)?', r'embargo(?:es|ed)?',
-    r'protest(?:s|ed|ing|er|ers)?', r'demonstrat(?:e|ed|ion|ions|or|ors)?',
-    r'crackdown(?:s)?', r'suppres(?:s|sed|sion)?', r'censor(?:ed|ship|s)?',
-    r'propaganda', r'disinformation', r'misinformation',
-    r'impeach(?:ed|ment|s)?', r'resign(?:ed|ation|s)?',
-    r'scandal(?:s)?', r'controversy', r'controversies',
-    r'allegation(?:s)?', r'accus(?:e|ed|ation|ations)?',
-    r'recession', r'depression', r'bankruptcy', r'bankruptcies',
-    r'bankrupt(?:ed|s)?', r'default(?:ed|s|ing)?',
-    r'collapse(?:d|s)?', r'crisis', r'crises',
-    r'inflation', r'poverty', r'destitut(?:e|ion)',
-    r'unemployment', r'layoff(?:s)?', r'retrench(?:ment|ed)?',
-    r'strike(?:s|d)?', r'lockout(?:s)?',
-
     # Abuse & oppression
     r'oppress(?:ion|ed|ing)?', r'discriminat(?:e|ed|ion|ory)?',
     r'persecutr?(?:e|ed|ion)?', r'ethnic\s?violenc(?:e)?',
     r'segregat(?:e|ed|ion)?', r'apartheid', r'torture(?:d|s)?',
     r'torment(?:ed|ing|s)?', r'humiliat(?:e|ed|ion)?',
     r'degrad(?:e|ed|ing|ation)?', r'exploit(?:ation|ed)?',
-    r'enslave(?:d|ment)?', r'forced\s?labor', r'child\s?labor',
-
-    # Misc danger
-    r'threat(?:s|ened|ening)?', r'danger(?:ous|ed)?',
-    r'hazard(?:ous|s)?', r'risk(?:s)?', r'peril(?:ous|s)?',
-    r'emergency', r'emergencies', r'crisis', r'crises',
-    r'ultimatum(?:s)?', r'blackout(?:s)?', r'shutdown(?:s)?',
-    r'quarantine(?:d|s)?', r'lockdown(?:s)?',
-]) + r')\b', re.IGNORECASE)
+    r'enslave(?:d|ment)?', r'forced\s?labor', r'child\s?labor'
 
 
 def is_bangla(text: str) -> bool:
