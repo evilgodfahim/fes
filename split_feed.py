@@ -3,160 +3,400 @@ from feedgen.feed import FeedGenerator
 import requests
 import re
 from email.utils import parsedate_to_datetime
+from datetime import datetime, timezone, timedelta
+import os
 
-# --- Source feeds (list, not tuple) ---
+# --- Config ---
 SOURCE_URLS = [
     "https://politepaul.com/fd/BNnVF6SFDNH6.xml",
     "https://evilgodfahim.github.io/tbs/articles.xml",
 ]
+MAX_ARTICLES = 500
+MAX_AGE_HOURS = 3
 
 # --- Bangla character detector ---
 bangla_re = re.compile(r'[\u0980-\u09FF]')
 
-# --- Comprehensive negative/dark news word list ---
+# ============================================================
+# NEGATIVE / LOW-VALUE FILTER
+#
+# PASS THROUGH (never block):
+#   * Ongoing war reporting (Gaza, Ukraine, Middle East, etc.)
+#   * Trade war, tariffs, sanctions, geopolitics, diplomacy
+#   * Economic policy, markets, business, agriculture
+#   * Political analysis, governance, international relations
+#
+# BLOCK:
+#   * BD local accidents (road, gas, drowning, fire, structural)
+#   * BD local court drama (remand, bail, petty arrests, ACC)
+#   * Local police ops, drug busts, small-time crime
+#   * Murder, sexual violence, child abuse
+#   * Celebrity gossip (Epstein-type), sensationalism
+#
+# KEY DESIGN RULE:
+#   Ambiguous single words — attack, bomb, war, losses, crash,
+#   blast, militant, combat, hostile — are REMOVED entirely.
+#   Only compound phrases or genuinely unambiguous standalone
+#   terms are kept. BD-specific local patterns are added
+#   explicitly to catch noise global wordlists miss.
+# ============================================================
+
 NEGATIVE_WORDS = re.compile(r'\b(' + '|'.join([
-    # Death & killing
-    r'kill(?:ed|s|ing|er|ers)?', r'murder(?:ed|s|ing|er|ers)?',
-    r'slaughter(?:ed|s|ing)?', r'massacre(?:d|s)?', r'assassin(?:ate|ated|ation|s)?',
-    r'execut(?:e|ed|ion|ions)?', r'homicide', r'manslaughter',
-    r'decapitat(?:e|ed|ion)?', r'behead(?:ed|ing|s)?',
-    r'died?', r'dead', r'death(?:s)?', r'fatality', r'fatalities',
-    r'casualt(?:y|ies)', r'corpse(?:s)?', r'bod(?:y|ies)', r'mort(?:uary|uarys)?',
-    r'lifeless', r'perish(?:ed|es|ing)?', r'toll', r'slain', r'fallen', r'perished',
-    r'killed\s?in', r'burn(?:ed|ing)?', r'charred', r'cremated', r'postmortem',
-    r'autopsy', r'obituary', r'obituaries', r'bury', r'buried', r'burial',
-    r'grave(?:s)?', r'cemetery', r'gravesite', r'ashes', r'laid\s?to\s?rest',
-    r'killing\s?spree', r'atrocit(?:y|ies)?', r'genocide', r'ethnic\s?cleans(?:ing|e)?',
-    r'pogrom(?:s)?', r'war\s?crime(?:s)?', r'combat\s?fatalit(?:y|ies)?', r'sniper(?:ed|s)?',
-    r'ambush(?:ed|es|ing)?', r'targeted\s?killing', r'collateral\s?damage',
-    r'friendly\s?fire', r'executioner', r'extra[-\s]?judicial', r'hit[-\s]?squad',
-    r'assassination', r'assassinated', r'struck\s?down', r'mass[-\s]?fatalit(?:y|ies)?',
-    r'plane\s?crash', r'air\s?crash', r'train\s?crash', r'pile[-\s]?up', r'collision',
-    r'fatal\s?crash', r'crashed', r'derail(?:ed|ing)?', r'capsiz(?:e|ed|ing)?',
-    r'sink(?:ing|ed)?', r'found\s?dead', r'discovered\s?dead', r'missing\s?and\s?dead',
 
-    # Injury & violence
-    r'injur(?:e|ed|y|ies|ing)?', r'wound(?:ed|s|ing)?', r'hurt(?:ing)?',
-    r'maim(?:ed|s|ing)?', r'crippl(?:e|ed|ing)?', r'mutilat(?:e|ed|ion)?',
-    r'disembowel(?:ed|ment)?', r'amputat(?:e|ed|ion)?', r'assault(?:ed|s|ing|er)?',
-    r'attack(?:ed|s|ing|er|ers)?', r'beat(?:en|ing|s)?', r'batter(?:ed|ing|s)?',
-    r'bludgeon(?:ed|ing|s)?', r'stab(?:bed|bing|s)?', r'shot', r'shoot(?:ing|ings|er|ers)?',
-    r'gun(?:man|men|shot|shots|fire)?', r'shoot(?:out)?', r'grenade(?:s)?', r'landmine(?:s)?',
-    r'ied', r'bomb(?:ed|ing|s)?', r'blast(?:ed|ing|s)?', r'explosion(?:s)?',
-    r'car\s?bomb', r'vehicular\s?assault', r'run\s?over', r'drive-by', r'lynch(?:ed|ing)?',
-    r'lacerat(?:e|ed|ion)?', r'fractur(?:e|ed|es)?', r'crush(?:ed|ing)?', r'compress(?:ed|ion)?',
-    r'choke(?:d|ing)?', r'asphyx(?:ia|iate|iated)?', r'drown(?:ed|ing)?',
-    r'electrocut(?:ed|ion)?', r'poison(?:ed|ing)?', r'overdose(?:d|s)?', r'acid\s?attack(?:s)?',
-    r'ston(?:e|ing|ed)?', r'strangl(?:e|ed|ing)?', r'clash(?:es|ed|ing)?', r'riot(?:s|ed|ing)?',
-    r'violenc(?:e|es)?', r'vicious(?:ly)?', r'bloodshed', r'bloodbath', r'gore', r'gruesome',
-    r'brutal(?:ity|ities)?', r'savag(?:e|ery)', r'tortur(?:e|ed|ing)?', r'perpetrator(?:s)?',
-    r'assailant(?:s)?', r'attacker(?:s)?', r'mob(?:s)?', r'siege(?:s)?', r'hostil(?:ity|ities)?',
-    r'combat(?:ed|ing)?', r'explosion(?:al)?', r'detonate(?:d|ion)?', r'IED\s?attack', r'shrapnel',
-    r'gunfire', r'rifle', r'pistol', r'bullet(?:s)?', r'bulletproof', r'bullet[-\s]?riddled',
-    r'stomp(?:ed|ing)?', r'beaten\s?to\s?death', r'body\s?bag', r'medical\s?emergency',
-    r'hemorrhag(?:e|ic)', r'internal\s?bleed(?:ing)?', r'bleed(?:ing)?', r'severe\s?injur(?:y|ies)?',
+    # ── DEATH — unambiguous crime/atrocity terms only ────────────────────
+    # "kill" alone → too broad ("kills deal", "kills growth target")
+    # "die/dead/death" alone → too broad ("dead in the water", policy)
+    # Only unambiguous synonyms and specific compound phrases used.
+    r'murder(?:ed|s|ing|er|ers)?',
+    r'homicide',
+    r'manslaughter',
+    r'decapitat(?:e|ed|ion)?',
+    r'behead(?:ed|ing|s)?',
+    r'massacr(?:e|ed|es)',
+    r'assassination|assassinated',
+    r'suicid(?:e|al|es|ed)?',
+    r'hang(?:s|ed|ing)?\s+(?:himself|herself|themselves)',
+    r'shot\s+dead',
+    r'shot\s+and\s+killed',
+    r'beaten\s+to\s+death',
+    r'burned?\s+(?:alive|to\s+death)',
+    r'hacked?\s+to\s+death',
+    r'stabbed?\s+to\s+death',
+    r'strangled?\s+to\s+death',
+    r'killed\s+in\s+(?:road|highway|bus|truck|car|train|ferry|launch|boat)\s+(?:accident|crash|collision)',
+    r'killed\s+(?:by|in)\s+(?:gas|fire|blast|explosion|flood|lightning|stampede|drowning)',
+    r'killed\s+on\s+(?:the\s+)?spot',
+    r'died?\s+on\s+(?:the\s+)?spot',
+    r'dead\s+on\s+(?:the\s+)?spot',
+    r'found\s+(?:dead|hanging|hanged)',
+    r'body\s+(?:recovered|found|retrieved)\s+(?:from|in)\s+(?:river|pond|canal|lake|well|drain|ditch|water)',
+    r'death\s+row',
+    r'lethal\s+injection',
+    r'capital\s+punishment',
+    r'execution[-\s]?style',
+    r'mass\s+(?:murder|killing|execution|grave)',
+    r'double\s+(?:murder|homicide)',
+    r'triple\s+(?:murder|homicide)',
+    r'serial\s+kill(?:er|ing)',
+    r'mob\s+kill(?:ing)?',
+    r'targeted\s+kill(?:ing)?',
+    r'extrajudicial\s+kill(?:ing)?',
+    r'drove\s+off\s+(?:a\s+)?cliff',
+    r'plunge[sd]?\s+to\s+(?:his|her|their\s+)?death',
+    r'fell?\s+to\s+(?:his|her|their\s+)?death',
+    r'postmortem|autopsy',
+    r'obituary|obituaries',
+    r'morgue(?:s)?',
+    r'corpse(?:s)?',
+    r'last\s+rites',
 
-    # Crime & law enforcement
-    r'arrest(?:ed|s|ing)?', r'detain(?:ed|s|ing|ee|ment)?', r'apprehend(?:ed|s|ing)?',
-    r'imprison(?:ed|ment)?', r'jail(?:ed|s|ing)?', r'prison(?:er|ers|s)?',
-    r'incarcer(?:ate|ated|ion)?', r'handcuff(?:ed|s)?', r'search\s?warrant', r'warrant(?:s)?',
-    r'suspect(?:ed|s)?', r'accused', r'charg(?:e|ed|es|ing)?', r'indict(?:ed|ment|s)?',
-    r'convict(?:ed|ion|ions|s)?', r'sentence(?:d|s|ing)?', r'verdict(?:s)?', r'trial(?:s)?',
-    r'court(?:s)?', r'lawsuit(?:s)?', r'sue(?:d|s)?', r'suing', r'plead(?:ed|ing|s)?',
-    r'guilty', r'acquitt(?:al|ed)?', r'parole', r'probation', r'obstruction(?:\s?of\s?justice)?',
-    r'perjur(?:y|ed)?', r'subpoena(?:ed)?', r'contempt(?:\s?of\s?court)?', r'forgery',
-    r'counterfeit(?:ing|ed)?', r'arson(?:ed|s)?', r'fraud(?:ulent)?', r'scam(?:s|med|ming)?',
-    r'embezzl(?:e|ed|ment)?', r'brib(?:e|ed|ery|ing)?', r'corrupt(?:ion|ed)?', r'kickback(?:s)?',
-    r'money\s?launder(?:ing|ed)?', r'insider\s?trading', r'hit[-\s]?and[-\s]?run', r'traffick(?:ed|ing|er|ers)?',
-    r'smuggl(?:e|ed|ing|er|ers)?', r'kidnap(?:ped|ping|per|pers)?', r'abduct(?:ed|ion|s)?',
-    r'hostage(?:s)?', r'ransom(?:ed|s)?', r'extort(?:ion|ed|ing)?', r'blackmail(?:ed|ing)?',
-    r'larceny', r'theft', r'rob(?:bed|bery|beries|bing)?', r'burglary', r'burglar(?:y|ies|ize|ized)?',
-    r'loot(?:ed|ing|s)?', r'pillage(?:d)?', r'vandal(?:ize|ism|ized)?', r'trespass(?:er|ing)?',
-    r'pickpocket(?:ing|s)?', r'identity\s?theft', r'doxx(?:ing|ed)?', r'cybercrime(?:s)?',
-    r'hacking', r'malware', r'ransomware', r'phish(?:ing|ed)?', r'credit\s?card\s?fraud',
-    r'tax\s?evasion', r'evade(?:d|s|ing)?', r'scam(?:mer|mers)?', r'confidence\s?trick',
-    r'con\s?man', r'con\s?men', r'cultivated\s?fraud', r'fraudster', r'felony', r'felonies',
-    r'misdemeanor(?:s)?', r'breach\s?of\s?peace', r'seiz(?:e|ed|ure)?', r'asset\s?forfeit(?:ure|ures)?',
-    r'forfeit(?:ed)?', r'sealed\s?indictment', r'racketeer(?:ing)?', r'racketeering', r'black\s?market',
-    r'contraband', r'illicit\s?trade', r'possession\s?of\s?illegal', r'drug\s?bust', r'drug\s?raid',
-    r'possession(?:s)?', r'distribution\s?of\s?narcotics', r'cult\s?activity', r'gang(?:s)?',
-    r'organized\s?crime', r'mobster(?:s)?', r'crime\s?ring', r'perp(?:etrator)?', r'perp\s?name',
-    r'asset\s?freeze', r'forfeiture', r'breach\s?of\s?probation', r'probation\s?violation', r'scantion(?:s)?',
+    # ── VIOLENT CRIME & ASSAULT ───────────────────────────────────────────
+    # REMOVED as standalone (block war/geopolitical reporting):
+    #   attack, bomb, blast, explosion, militant, insurgent,
+    #   guerrilla, paramilitary, combat, siege, hostility,
+    #   shelling, mortar, airstrike, missile, bombardment
+    # Only specific interpersonal violence compound phrases kept.
+    r'maim(?:ed|s|ing)?',
+    r'mutilat(?:e|ed|ion)?',
+    r'disembowel(?:ed|ment)?',
+    r'bludgeon(?:ed|ing|s)?',
+    r'lynch(?:ed|ing)?|lynching',
+    r'strangl(?:e|ed|ing|ation)?',
+    r'suffocate?(?:d|s|ing)?|suffocation',
+    r'tortur(?:e|ed|ing|ous)?',
+    r'acid\s+attack(?:s)?',
+    r'mob\s+(?:attack|beat|assault|violence|justice|lynching)',
+    r'armed\s+robbery|armed\s+mugging',
+    r'drive[-\s]?by\s+(?:shoot|shooting|kill)',
+    r'gun(?:man|men)',
+    r'gunshot(?:s)?(?:\s+wound)?',
+    r'stabb(?:ed|ing)(?:\s+(?:victim|wound|attack))?',
+    r'knife\s+(?:attack|wound|stab)',
+    r'machete(?:s)?(?:\s+attack)?',
+    r'hail\s+of\s+bullets',
+    r'bullet[-\s]?riddled',
+    r'body\s+bag(?:s)?',
+    r'bloodshed',
+    r'bloodbath',
+    r'gruesome(?:\s+(?:murder|killing|crime|scene|discovery))?',
+    r'grisly(?:\s+(?:murder|killing|crime|scene|discovery))?',
+    r'perpetrator(?:s)?',
+    r'assailant(?:s)?',
+    r'pogrom(?:s)?',
+    r'genocide(?:s)?|genocidal',
+    r'ethnic\s+cleans(?:ing|e)?',
+    r'war\s+crime(?:s)?',
+    r'hate\s+(?:crime|speech)',
 
-    # Sexual violence
-    r'rape(?:d|s|ist|ists)?', r'raping', r'sexual\s?assault', r'sexual\s?violence',
-    r'molestation?', r'molest(?:ed|ing|er)?', r'sexual\s?abuse(?:d|s|r|rs)?', r'sexual\s?exploitation',
-    r'child\s?abuse', r'child\s?molestation', r'child\s?porn(?:ography|o)?', r'pedophil(?:e|ia|es)?',
-    r'grooming', r'incest', r'statutory\s?rape', r'sexual\s?harass(?:ed|ment|ing)?',
-    r'sexual\s?battery', r'date\s?rape', r'rape\s?kit', r'rape\s?culture', r'assault\s?in\s?the\s?first\s?degree',
-    r'assault\s?in\s?the\s?second\s?degree', r'sexual\s?exploitation', r'forced\s?sex', r'nonconsensual',
-    r'voyeur(?:ism|ist)?', r'exposure(?:\s?to\s?sexual)?', r'indecent\s?assault', r'indecent\s?exposure',
-    r'porno(?:graphy|graphic)?', r'child[-\s]?sex(?:ual)?\s?abuse', r'sexual\s?predator', r'sexual\s?offender',
-    r'sex\s?crime(?:s)?', r'peadophilia', r'sexually\s?abused', r'sexual\s?misconduct', r'rape\s?survivor',
+    # ── SEXUAL VIOLENCE — all terms (unambiguous) ─────────────────────────
+    r'rape(?:d|s|ist|ists)?|raping',
+    r'sexual\s+assault',
+    r'sexual\s+violence',
+    r'molestat(?:e|ed|ion|ing)?',
+    r'molest(?:ed|ing|er|s)?',
+    r'sexual\s+abuse(?:d|r|rs)?',
+    r'sexual\s+exploitation',
+    r'child\s+(?:abuse|molestation|sex(?:ual)?\s+abuse)',
+    r'child(?:ren)?s?\s+porn(?:ography|o)?',
+    r'pedophil(?:e|ia|es|ic)?',
+    r'grooming\s+(?:minor|child|victim|girl|boy)',
+    r'incest',
+    r'statutory\s+rape',
+    r'sexual\s+harass(?:ment|ed|ing)?',
+    r'sexual\s+battery',
+    r'date\s+rape',
+    r'nonconsensual',
+    r'voyeur(?:ism|ist)?',
+    r'indecent\s+(?:assault|exposure)',
+    r'sexual\s+(?:predator|offender|misconduct)',
+    r'sex\s+crime(?:s)?',
+    r'sexually\s+(?:abused|assaulted|harassed|exploited)',
 
-    # Abuse & oppression
-    r'oppress(?:ion|ed|ing)?', r'discriminat(?:e|ed|ion|ory)?', r'persecutr?(?:e|ed|ion)?',
-    r'ethnic\s?violenc(?:e)?', r'segregat(?:e|ed|ion)?', r'apartheid', r'torture(?:d|s)?',
-    r'torment(?:ed|ing|s)?', r'humiliat(?:e|ed|ion)?', r'degrad(?:e|ed|ing|ation)?',
-    r'exploit(?:ation|ed)?', r'enslave(?:d|ment)?', r'forced\s?labor', r'child\s?labor',
-    r'slav(?:e|ery)?', r'serfdom', r'peonage', r'forced\s?marriage', r'fgm', r'female\s?genital\s?mutilation',
-    r'cultural\s?erasure', r'systemic\s?rac(?:e|ism|ist)?', r'hate\s?crime(?:s)?', r'hate\s?speech',
-    r'ethnic\s?cleansing', r'state[-\s]?sponsored\s?violence', r'political\s?persecution',
-    r'genocidal', r'political\s?repression', r'blacklist(?:ed)?', r'suppression', r'coerc(?:e|ed|ion)?',
-    r'ostracis(?:e|ed|m)?', r'repression', r'subjugat(?:e|ed|ion)?', r'denial\s?of\s?rights',
-    r'civil\s?rights\s?violat(?:ion|ions)?', r'forced\s?displacement', r'ethnic\s?profiling',
-    r'disenfranchis(?:e|ed|ment)?', r'marginaliz(?:e|ed|ation)?', r'colonial(?:ism|ist)?',
-    r'cultural\s?suppression', r'repressive\s?regime', r'extrajudicial\s?detention', r'political\s?imprisonment',
-    r'ideological\s?persecution', r'xenophob(?:e|ic|ia)?', r'sectarian\s?violence', r'communal\s?violence',
-    r'state\s?terror(?:ism|ist)?', r'silent\s?genocide', r'forced\s?assimilation', r'ethnic\s?tension',
+    # ── FINANCIAL CRIME & CORRUPTION ─────────────────────────────────────
+    # "corrupt" alone → too broad (used in analysis, policy discourse)
+    # "fraud" → context makes it clearly criminal in news
+    r'kidnap(?:ped|ping|per|pers)?',
+    r'abduct(?:ed|ion|s)?',
+    r'hostage(?:s)?\s+(?:taken|held|situation|crisis)',
+    r'ransom\s+(?:demand|paid|money|note)',
+    r'extort(?:ion|ed|ing)?',
+    r'blackmail(?:ed|ing)?',
+    r'rob(?:bed|bery|beries|bing)?|robbery',
+    r'burglary|burglar(?:y|ies|ize|ized)?',
+    r'larceny|theft',
+    r'pickpocket(?:ing|s)?',
+    r'identity\s+theft',
+    r'vandal(?:ize|ism|ized)?',
+    r'arson(?:ist|ists)?',
+    r'forgery',
+    r'counterfeit(?:ing|ed)?\s+(?:currency|notes|documents|goods)',
+    r'fraud(?:ulent)?\s+(?:case|scheme|ring|money|transaction)',
+    r'scam(?:s|med|ming|mer|mers)?',
+    r'fraudster(?:s)?',
+    r'embezzl(?:e|ed|ment)?',
+    r'brib(?:e|ed|ery|ing)?|kickback(?:s)?',
+    r'graft\s+(?:case|charge|investigation)',
+    r'money\s+launder(?:ing|ed)?',
+    r'insider\s+trading',
+    r'tax\s+evasion',
+    r'ponzi(?:\s+scheme)?|pyramid\s+scheme',
+    r'wire\s+fraud|securities\s+fraud|credit\s+card\s+fraud',
+    r'cybercrime(?:s)?',
+    r'malware|ransomware|spyware',
+    r'phish(?:ing|ed)?',
+    r'doxx(?:ing|ed)?',
+    r'misappropriat(?:e|ed|ion)?',
+    r'pilferage|pilfer(?:ed|ing)?',
+    r'organized\s+crime',
+    r'crime\s+(?:ring|syndicate|cartel)',
+    r'mobster(?:s)?|crime\s+boss',
+    r'money\s+mule(?:s)?',
+    r'shell\s+compan(?:y|ies)',
+    r'benami\s+(?:property|asset|account)',
+    r'illegal\s+(?:arms|weapons?|guns?)',
+    r'drug\s+(?:trafficking|smuggling|dealing|cartel)',
+    r'narcotics\s+(?:trafficking|ring|bust|seizure)',
+    r'human\s+trafficking|sex\s+trafficking',
+    r'forced\s+(?:labor|marriage|prostitution)',
+    r'child\s+labor\s+(?:case|violation|charge)',
+    r'enslave(?:d|ment)?|slavery',
 
-    # Additional cross-category terms and variants
-    r'violator(?:s)?', r'victim(?:s)?', r'survivor(?:s)?', r'relat(?:ive|ives)?\s?killed',
-    r'crash(?:es)?', r'incident(?:s)?', r'scandal(?:s)?', r'cover[-\s]?up', r'leak(?:ed|s)?',
-    r'scuffle(?:s)?', r'altercat(?:ion|ions)?', r'fracas(?:es)?', r'brawl(?:s)?', r'riotous',
-    r'mobbed', r'mobster', r'perpetrated', r'persecuted', r'victimized', r'victimisation',
-    r'victimization', r'casualties', r'plunder(?:ed)?', r'raided', r'sack(?:ed)?',
-    r'guns?ling(?:er|ed)?', r'proxy\s?war', r'terror(?:ist|ism|ist)?', r'terror(?:s)?',
-    r'bombing(?:s)?', r'hostil(?:e|ity)', r'violator', r'abuser(?:s)?', r'abusive',
-    r'inhumane', r'atrocious', r'savagery', r'barbaric', r'barbarism', r'brutality',
-    r'heinous', r'heinousness', r'atrophy', r'incite(?:d|ment)?', r'incitement\s?to\s?violence',
-    r'propaganda\s?of\s?violence', r'warfare', r'mass\s?violence', r'mass[-\s]?eviction',
-    r'enfant', r'childrens?', r'rape?case', r'sexual?case', r'abduction', r'abducted',
+    # ── ARRESTS & LOCAL LEGAL DRAMA ───────────────────────────────────────
+    # Kept to catch BD local politician-arrested/remanded/bailed articles.
+    # "arrest" alone blocks "North Korea arrests US soldier" (international).
+    # Use "arrested for/over/by" to require a reason phrase — still catches
+    # local BD crime noise while being slightly more specific.
+    r'arrest(?:ed|s|ing)?\s+(?:for|on|in|over|by|after)',
+    r'remand(?:ed)?',
+    r'detain(?:ed)?\s+(?:for|on|over|by)',
+    r'apprehend(?:ed|s|ing)?',
+    r'handcuff(?:ed|s)?',
+    r'imprison(?:ed|ment)?',
+    r'incarcer(?:ate|ated|ion)?',
+    r'jail(?:ed)?\s+(?:for|over|after)',
+    r'warrant\s+(?:issued|against|for|served)',
+    r'search\s+warrant|arrest\s+warrant',
+    r'suspect(?:ed)?\s+(?:arrested|detained|nabbed?|in|of)',
+    r'accused\s+(?:of|in|over)',
+    r'indict(?:ed|ment|s)?',
+    r'convict(?:ed|ion|ions|s)?',
+    r'plead(?:ed|ing)?\s+guilty',
+    r'perjur(?:y|ed)?',
+    r'subpoena(?:ed)?',
+    r'contempt\s+of\s+court',
+    r'obstruction\s+of\s+justice',
+    r'parole\s+(?:violation|board|hearing|granted|denied)',
+    r'probation\s+(?:violation|breach|revoked)',
+    r'bail\s+(?:hearing|petition|granted|denied|refused|bond|jumping)',
+    r'acquitt(?:al|ed)?',
+    r'felony|felonies|misdemeanor(?:s)?',
+    r'lawsuit(?:s)?\s+(?:filed|over|against)',
+    r'sued?\s+(?:over|for)',
+    r'(?:case|suit|complaint|FIR|charge)\s+(?:filed|lodged|registered)\s+(?:against|over|for)',
+    r'FIR\s+(?:filed|lodged|registered)',
+    r'charged\s+(?:with|over|for|in|under)',
+    r'nabbed?\s+(?:for|with|over|in|by)',
+    r'fugitive(?:s)?',
+    r'manhunt\s+(?:for|launched|underway)',
+    r'wanted\s+(?:by\s+police|for\s+(?:murder|rape|theft|robbery|kidnapping))',
+    r'sealed\s+indictment',
+    r'racketeer(?:ing)?',
+    r'drug\s+(?:bust|raid|haul|seizure)',
+    r'narcotics\s+(?:seized|recovered|busted)',
+    r'gang\s+(?:member|leader|arrested|busted|nabbed?|crackdown)',
+
+    # ── BD-SPECIFIC LOCAL POLITICAL & LEGAL NOISE ─────────────────────────
+    r'RAB\s+(?:raid|operation|crackdown|arrest|detain|nab|killed?|recover)',
+    r'detective\s+branch\s+(?:raid|arrest|operation|detain)',
+    r'DB\s+police\s+(?:raid|arrest|operation)',
+    r'police\s+(?:raided?|crackdown|drive|operation)\s+(?:in|at|on)\s+\w+',
+    r'thana\s+(?:police|case|OC)',
+    r'upazila\s+(?:police|chairman|parishad)\s+(?:arrest|sue|remand|kill|detain)',
+    r'union\s+parishad\s+(?:chairman|member)\s+(?:arrested|sued|remanded|killed)',
+    r'ex[-\s](?:minister|secretary|mp|sp|dc|uo|pdb|chairman|mayor|councillor)\s+(?:arrest|remand|jail|detain|sue|indict|convict|charge|kill)',
+    r'former\s+(?:minister|secretary|mp|chairman|mayor)\s+(?:arrested|remanded|jailed|detained|sued|indicted|convicted)',
+    r'acc\s+(?:case|suit|probe|charge|investigation)',
+    r'disproportionate\s+(?:asset|wealth|income)',
+    r'undisclosed\s+(?:asset|income|wealth)',
+    r'Tk\s*\d+(?:\.\d+)?\s*(?:cr|crore|lac|lakh)\s+(?:launder|misappropriat|embezzl|siphon|loot|swindl)',
+    r'laundering\s+Tk',
+
+    # BD drug/crime-specific terms
+    r'yaba(?:\s+(?:tablet|pill|dealer|peddler|seized|recovered|bust))?',
+    r'phensedyl(?:\s+(?:seized|recovered|dealer|bust))?',
+    r'ganja(?:\s+(?:seized|recovered|dealer|bust))?',
+    r'dakait|dacoity',
+    r'snatching\s+(?:case|gang|incident|victim)',
+
+    # ── ROAD & TRANSPORT ACCIDENTS ────────────────────────────────────────
+    # "crash" alone blocks "market crash", "stock crash", "currency crash"
+    # All patterns are specific physical accident compounds.
+    r'road\s+(?:accident|crash|fatality)',
+    r'highway\s+accident',
+    r'bus\s+(?:accident|overturns?|plunge[sd]?|crash(?:es|ed)?|capsize)',
+    r'truck\s+(?:accident|crash(?:es|ed)?|overturn)',
+    r'motorcycle\s+accident|motorbike\s+accident',
+    r'bike\s+(?:accident|crash(?:ed)?)',
+    r'auto[-\s]?rickshaw\s+(?:accident|crash|collision|overturn)',
+    r'three[-\s]?wheeler\s+(?:accident|crash|overturn)',
+    r'microbus\s+(?:accident|crash(?:ed)?|collision|overturn)',
+    r'vehicle\s+(?:accident|overturns?)',
+    r'run\s+over\s+(?:by\s+)?(?:a\s+)?(?:bus|truck|car|lorry|vehicle|auto|motorcycle|train)',
+    r'hit\s+by\s+(?:a\s+)?(?:bus|truck|car|lorry|vehicle|train|motorcycle|auto)',
+    r'pedestrian\s+(?:killed|dead|mowed\s+down|run\s+over|crushed)',
+    r'train\s+(?:accident|crash(?:ed)?|derail(?:ed)?)',
+    r'level\s+crossing\s+(?:accident|crash|death)',
+    r'ferry\s+(?:capsize[sd]?|sunk|sank|accident|overturn)',
+    r'launch\s+(?:capsize[sd]?|sunk|sank|accident)',
+    r'trawler\s+(?:capsize[sd]?|sunk|sank|accident)',
+    r'speedboat\s+(?:capsize[sd]?|accident|crash)',
+    r'boat\s+(?:capsize[sd]?|accident|sunk|sank)',
+    r'bridge\s+collapse[sd]?',
+    r'fell?\s+(?:from|off)\s+(?:a\s+)?(?:bridge|building|roof|tree|ladder|bike|rickshaw|motorcycle|scaffolding)',
+    r'fell?\s+into\s+(?:a\s+)?(?:well|pond|canal|river|ditch|drain|lake)',
+    r'plunged?\s+(?:into|off)\s+(?:river|canal|lake|pond|ditch|cliff)',
+
+    # ── DROWNING ─────────────────────────────────────────────────────────
+    r'drown(?:ed|ing|s)?',
+    r'swept\s+away\s+(?:by|in)\s+(?:flood|current|river|tide|wave)',
+    r'missing\s+(?:in|after)\s+(?:river|flood|sea|storm|cyclone)',
+
+    # ── GAS EXPLOSIONS & LOCAL FIRE ACCIDENTS ────────────────────────────
+    # "blast/explosion/fire" alone blocks war/industrial/policy reporting.
+    # Only local accident-specific compound phrases.
+    r'gas\s+(?:burst|cylinder\s+(?:blast|burst|explosion))',
+    r'gas\s+cylinder\s+(?:blast|burst|explode[sd]?)',
+    r'cylinder\s+(?:blast|burst|explosion)',
+    r'boiler\s+(?:burst|explosion|blast)',
+    r'LPG\s+(?:burst|explosion|fire|blast)',
+    r'cooking\s+gas\s+(?:fire|blast|explosion|burst)',
+    r'kitchen\s+fire',
+    r'house\s+fire',
+    r'building\s+fire',
+    r'market\s+fire',
+    r'factory\s+fire',
+    r'slum\s+fire',
+    r'shop(?:s)?\s+(?:gutted|burned|destroyed)\s+(?:in|by)\s+fire',
+    r'gutted\s+(?:in|by)\s+(?:fire|blaze)',
+    r'engulf(?:ed)?\s+(?:by|in)\s+(?:fire|flames?)',
+    r'ravage(?:d)?\s+(?:by|in)\s+(?:fire|flames?)',
+    r'fire\s+broke\s+out',
+    r'fire\s+(?:gutted|kill(?:ed|s)?|claim(?:ed|s)?)',
+    r'blaze\s+(?:kill(?:ed|s)?|destroy(?:ed|s)?|gut(?:ted)?|engulf|claim(?:ed|s)?)',
+    r'inferno\s+(?:kill(?:ed|s)?|destroy)',
+
+    # ── STRUCTURAL & ENVIRONMENTAL LOCAL ACCIDENTS ────────────────────────
+    r'building\s+collapse[sd]?',
+    r'wall\s+collapse[sd]?',
+    r'roof\s+collapse[sd]?',
+    r'construction\s+(?:accident|worker\s+(?:killed|dead))',
+    r'electrocut(?:ed|ion)?',
+    r'lightning\s+(?:kill(?:ed|s)?|struck|dead)',
+    r'struck\s+by\s+lightning',
+    r'snake\s+bite\s+(?:kill(?:ed|s)?|dead|fatal)',
+    r'stampede\s+(?:kill(?:ed|s)?|dead|injur|casualt)',
+    r'landslide\s+(?:kill(?:ed|s)?|dead|bury|claim)',
+    r'flood\s+(?:kill(?:ed|s)?|dead|claim|bury)',
+
+    # ── CELEBRITY & SENSATIONALIST NOISE ─────────────────────────────────
+    r'epstein',
+    r'weinstein',
+    r'sex\s+tape',
+    r'leaked?\s+(?:video|photo|footage|clip|nude)',
+    r'nude\s+(?:photo|video|picture|image|clip)',
+    r'OnlyFans',
+    r'extramarital\s+(?:affair|relation)',
+    r'love\s+triangle',
+    r'celebrity\s+(?:scandal|divorce|breakup|feud|affair)',
+    r'reality\s+(?:TV\s+)?star\s+(?:arrested|charged|sued|jailed)',
+    r'scandal\s+(?:rocks?|hits?|grips?|engulfs?|shakes?)\s+\w+',
+
 ]) + r')\b', re.IGNORECASE)
 
-# --- Thumbnail extraction helpers ---
+# --- Thumbnail helpers ---
 IMG_SRC_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
 
 def extract_thumbnail_from_summary(summary: str):
     if not summary:
         return None
     m = IMG_SRC_RE.search(summary)
-    if m:
-        return m.group(1)
-    return None
+    return m.group(1) if m else None
 
 def get_thumbnail(entry) -> str | None:
+    # 1. feedparser enclosures — handles RSS <enclosure> tags (TBS fix)
+    enclosures = entry.get('enclosures') or []
+    for enc in enclosures:
+        href = enc.get('href') or enc.get('url')
+        etype = (enc.get('type') or '').lower()
+        if href and 'image' in etype:
+            return href
+
+    # 2. media:thumbnail
     mt = entry.get('media_thumbnail')
-    if mt and isinstance(mt, (list, tuple)) and mt:
-        url = mt[0].get('url') if isinstance(mt[0], dict) else mt[0]
-        if url:
-            return url
-    if isinstance(mt, dict) and mt.get('url'):
-        return mt.get('url')
+    if mt:
+        if isinstance(mt, (list, tuple)) and mt:
+            url = mt[0].get('url') if isinstance(mt[0], dict) else mt[0]
+            if url:
+                return url
+        elif isinstance(mt, dict) and mt.get('url'):
+            return mt.get('url')
 
+    # 3. media:content
     mc = entry.get('media_content')
-    if mc and isinstance(mc, (list, tuple)) and mc:
-        url = mc[0].get('url') if isinstance(mc[0], dict) else mc[0]
-        if url:
-            return url
-    if isinstance(mc, dict) and mc.get('url'):
-        return mc.get('url')
+    if mc:
+        if isinstance(mc, (list, tuple)) and mc:
+            url = mc[0].get('url') if isinstance(mc[0], dict) else mc[0]
+            if url:
+                return url
+        elif isinstance(mc, dict) and mc.get('url'):
+            return mc.get('url')
 
+    # 4. links (rel=enclosure or image type)
     links = entry.get('links') or []
-    for l in links:
-        rel = (l.get('rel') or '').lower()
-        ltype = (l.get('type') or '').lower()
-        href = l.get('href') or l.get('url')
+    for lnk in links:
+        rel = (lnk.get('rel') or '').lower()
+        ltype = (lnk.get('type') or '').lower()
+        href = lnk.get('href') or lnk.get('url')
         if not href:
             continue
         if rel == 'enclosure' and ltype.startswith('image'):
@@ -164,58 +404,118 @@ def get_thumbnail(entry) -> str | None:
         if rel == 'thumbnail' or 'image' in ltype:
             return href
 
+    # 5. misc keys
     for key in ('thumbnail', 'image', 'enclosure'):
         val = entry.get(key)
         if isinstance(val, dict) and val.get('url'):
             return val.get('url')
-        if isinstance(val, str):
+        if isinstance(val, str) and val:
             return val
 
-    summary = entry.get('summary') or entry.get('description') or ''
-    thumb = extract_thumbnail_from_summary(summary)
-    if thumb:
-        return thumb
-
-    sd = entry.get('summary_detail') or {}
-    sd_val = sd.get('value') if isinstance(sd, dict) else None
-    if sd_val:
-        thumb = extract_thumbnail_from_summary(sd_val)
+    # 6. img tag in summary/description
+    for field in ('summary', 'description', 'content'):
+        text = entry.get(field)
+        if isinstance(text, list):
+            text = text[0].get('value', '') if text else ''
+        thumb = extract_thumbnail_from_summary(text or '')
         if thumb:
             return thumb
 
     return None
 
+# --- Filters ---
 def is_bangla(text: str) -> bool:
     return bool(bangla_re.search(text or ""))
 
 def is_negative(entry) -> bool:
-    text = " ".join([
+    text = " ".join(filter(None, [
         entry.get("title", "") or "",
         entry.get("summary", "") or "",
-        entry.get("tags", [{}])[0].get("term", "") if entry.get("tags") else "",
-    ])
+        (entry.get("tags") or [{}])[0].get("term", ""),
+    ]))
     return bool(NEGATIVE_WORDS.search(text))
 
-def make_feed(title: str, link: str, description: str, items: list) -> FeedGenerator:
+def get_pub_datetime(entry) -> datetime | None:
+    pub = entry.get("published") or entry.get("updated")
+    if pub:
+        try:
+            return parsedate_to_datetime(pub)
+        except Exception:
+            pass
+    pp = entry.get("published_parsed") or entry.get("updated_parsed")
+    if pp:
+        try:
+            return datetime(*pp[:6], tzinfo=timezone.utc)
+        except Exception:
+            pass
+    return None
+
+def is_too_old(entry) -> bool:
+    dt = get_pub_datetime(entry)
+    if dt is None:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - dt) > timedelta(hours=MAX_AGE_HOURS)
+
+# --- Persistence: load existing XML ---
+def load_existing(filename: str) -> tuple[list, set]:
+    entries, seen = [], set()
+    if not os.path.exists(filename):
+        return entries, seen
+    try:
+        feed = feedparser.parse(filename)
+        for e in feed.entries:
+            link = e.get('link', '')
+            if link and link not in seen:
+                seen.add(link)
+                entries.append(e)
+        print(f"[LOAD] {filename} — {len(entries)} existing entries")
+    except Exception as ex:
+        print(f"[WARN] Could not load {filename}: {ex}")
+    return entries, seen
+
+# --- Build & save feed ---
+def save_feed(filename: str, title: str, feed_link: str, description: str,
+              new_entries: list, existing_entries: list, seen_links: set):
+    merged = []
+
+    for e in new_entries:
+        link = e.get('link', '')
+        if link and link not in seen_links:
+            seen_links.add(link)
+            merged.append(e)
+
+    merged.extend(existing_entries)
+    merged = merged[:MAX_ARTICLES]
+
     fg = FeedGenerator()
     fg.title(title)
-    fg.link(href=link, rel="alternate")
+    fg.link(href=feed_link, rel="alternate")
     fg.description(description)
     fg.language("en")
 
-    for entry in items:
+    for entry in merged:
         fe = fg.add_entry()
         fe.title(entry.get("title", "No title"))
         fe.link(href=entry.get("link", ""))
-        summary = entry.get("summary", "") or ""
+
+        summary = (entry.get("summary") or entry.get("description") or "")
+        if isinstance(summary, list):
+            summary = summary[0].get('value', '') if summary else ''
+        summary = summary or ""
+
         thumb = get_thumbnail(entry)
         if thumb and not IMG_SRC_RE.search(summary):
             summary = f'<img src="{thumb}" alt="thumbnail" />' + summary
+
+        fe.description(summary)
+
+        if thumb:
             try:
-                fe.enclosure(thumb, 0, 'image/*')
+                fe.enclosure(thumb, 0, 'image/jpeg')
             except Exception:
                 pass
-        fe.description(summary)
 
         pub = entry.get("published") or entry.get("updated")
         if pub:
@@ -224,49 +524,59 @@ def make_feed(title: str, link: str, description: str, items: list) -> FeedGener
             except Exception:
                 pass
 
-    return fg
+    fg.rss_file(filename)
+    print(f"[SAVE] {filename} — {len(merged)} total ({len(new_entries)} new attempted)")
 
+# --- Fetch ---
 def fetch_feed(url: str) -> list:
     try:
         resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         resp.raise_for_status()
         feed = feedparser.parse(resp.content)
-        print(f"[OK] {url} — {len(feed.entries)} entries")
+        print(f"[OK]   {url} — {len(feed.entries)} entries")
         return feed.entries
     except Exception as e:
         print(f"[FAIL] {url} — {e}")
         return []
 
+# --- Main ---
 def main():
     all_entries = []
     for url in SOURCE_URLS:
         all_entries.extend(fetch_feed(url))
 
-    print(f"\nTotal entries fetched: {len(all_entries)}")
+    print(f"\nTotal fetched: {len(all_entries)}")
 
-    bangla_positive, english_positive = [], []
+    bangla_new, english_new = [], []
+    skipped_neg = skipped_old = 0
 
     for entry in all_entries:
-        text = (entry.get("title", "") or "") + " " + (entry.get("summary", "") or "")
         if is_negative(entry):
-            continue  # skip negative articles entirely
+            skipped_neg += 1
+            continue
+        if is_too_old(entry):
+            skipped_old += 1
+            continue
+        text = (entry.get("title", "") or "") + " " + (entry.get("summary", "") or "")
         if is_bangla(text):
-            bangla_positive.append(entry)
+            bangla_new.append(entry)
         else:
-            english_positive.append(entry)
+            english_new.append(entry)
 
-    print(f"Bangla saved: {len(bangla_positive)}")
-    print(f"English saved: {len(english_positive)}")
+    print(f"Skipped negative : {skipped_neg}")
+    print(f"Skipped too old  : {skipped_old}")
+    print(f"New Bangla       : {len(bangla_new)}")
+    print(f"New English      : {len(english_new)}")
+    print()
 
     feeds = {
-        "bangla.xml":  ("Bangla News",  "Filtered positive Bangla news",   bangla_positive),
-        "english.xml": ("English News", "Filtered positive English news",   english_positive),
+        "bangla.xml":  ("Bangla News",  "Filtered positive Bangla news",  bangla_new),
+        "english.xml": ("English News", "Filtered positive English news", english_new),
     }
 
-    for filename, (title, desc, items) in feeds.items():
-        fg = make_feed(title, SOURCE_URLS[0], desc, items)
-        fg.rss_file(filename)
-        print(f"Written: {filename} ({len(items)} items)")
+    for filename, (title, desc, new_items) in feeds.items():
+        existing, seen = load_existing(filename)
+        save_feed(filename, title, SOURCE_URLS[0], desc, new_items, existing, seen)
 
 if __name__ == "__main__":
     main()
