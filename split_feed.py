@@ -136,15 +136,6 @@ def extract_thumbnail_from_summary(summary: str):
     return None
 
 def get_thumbnail(entry) -> str | None:
-    """
-    Try common places feeds store thumbnail/image info and return the first URL found:
-    - media_thumbnail (feedparser standard)
-    - media_content (feedparser)
-    - links with rel 'enclosure' and image type
-    - 'thumbnail' or 'image' keys
-    - img tag in summary/html
-    """
-    # 1) media_thumbnail
     mt = entry.get('media_thumbnail')
     if mt and isinstance(mt, (list, tuple)) and mt:
         url = mt[0].get('url') if isinstance(mt[0], dict) else mt[0]
@@ -153,7 +144,6 @@ def get_thumbnail(entry) -> str | None:
     if isinstance(mt, dict) and mt.get('url'):
         return mt.get('url')
 
-    # 2) media_content
     mc = entry.get('media_content')
     if mc and isinstance(mc, (list, tuple)) and mc:
         url = mc[0].get('url') if isinstance(mc[0], dict) else mc[0]
@@ -162,10 +152,8 @@ def get_thumbnail(entry) -> str | None:
     if isinstance(mc, dict) and mc.get('url'):
         return mc.get('url')
 
-    # 3) links (enclosure or image)
     links = entry.get('links') or []
     for l in links:
-        # typical link dict has 'rel', 'type', 'href'
         rel = (l.get('rel') or '').lower()
         ltype = (l.get('type') or '').lower()
         href = l.get('href') or l.get('url')
@@ -173,11 +161,9 @@ def get_thumbnail(entry) -> str | None:
             continue
         if rel == 'enclosure' and ltype.startswith('image'):
             return href
-        # some feeds use rel 'thumbnail' or type containing 'image'
         if rel == 'thumbnail' or 'image' in ltype:
             return href
 
-    # 4) common single keys
     for key in ('thumbnail', 'image', 'enclosure'):
         val = entry.get(key)
         if isinstance(val, dict) and val.get('url'):
@@ -185,13 +171,11 @@ def get_thumbnail(entry) -> str | None:
         if isinstance(val, str):
             return val
 
-    # 5) fallback: parse <img> from summary or summary_detail
     summary = entry.get('summary') or entry.get('description') or ''
     thumb = extract_thumbnail_from_summary(summary)
     if thumb:
         return thumb
 
-    # 6) summary_detail value (sometimes contains encoded HTML)
     sd = entry.get('summary_detail') or {}
     sd_val = sd.get('value') if isinstance(sd, dict) else None
     if sd_val:
@@ -204,7 +188,6 @@ def get_thumbnail(entry) -> str | None:
 def is_bangla(text: str) -> bool:
     return bool(bangla_re.search(text or ""))
 
-
 def is_negative(entry) -> bool:
     text = " ".join([
         entry.get("title", "") or "",
@@ -212,7 +195,6 @@ def is_negative(entry) -> bool:
         entry.get("tags", [{}])[0].get("term", "") if entry.get("tags") else "",
     ])
     return bool(NEGATIVE_WORDS.search(text))
-
 
 def make_feed(title: str, link: str, description: str, items: list) -> FeedGenerator:
     fg = FeedGenerator()
@@ -225,34 +207,26 @@ def make_feed(title: str, link: str, description: str, items: list) -> FeedGener
         fe = fg.add_entry()
         fe.title(entry.get("title", "No title"))
         fe.link(href=entry.get("link", ""))
-        # keep original description, but if there's a found thumbnail and the description
-        # doesn't already contain an <img>, prepend a small img tag so feed readers show a thumbnail inline.
         summary = entry.get("summary", "") or ""
         thumb = get_thumbnail(entry)
         if thumb and not IMG_SRC_RE.search(summary):
-            # prepend image tag (simple, minimal)
             summary = f'<img src="{thumb}" alt="thumbnail" />' + summary
-            # also add as enclosure for clients that use enclosure/media
             try:
                 fe.enclosure(thumb, 0, 'image/*')
             except Exception:
-                # some versions of feedgen may raise; ignore to keep original behavior on failure
                 pass
         fe.description(summary)
 
-        # Safely parse pubDate
         pub = entry.get("published") or entry.get("updated")
         if pub:
             try:
                 fe.pubDate(parsedate_to_datetime(pub))
             except Exception:
-                pass  # skip malformed dates
+                pass
 
     return fg
 
-
 def fetch_feed(url: str) -> list:
-    """Fetch and parse a single RSS URL, return list of entries."""
     try:
         resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         resp.raise_for_status()
@@ -263,7 +237,6 @@ def fetch_feed(url: str) -> list:
         print(f"[FAIL] {url} — {e}")
         return []
 
-
 def main():
     all_entries = []
     for url in SOURCE_URLS:
@@ -271,35 +244,29 @@ def main():
 
     print(f"\nTotal entries fetched: {len(all_entries)}")
 
-    bangla_positive, bangla_negative = [], []
-    english_positive, english_negative = [], []
+    bangla_positive, english_positive = [], []
 
     for entry in all_entries:
         text = (entry.get("title", "") or "") + " " + (entry.get("summary", "") or "")
-        negative = is_negative(entry)
-        bangla = is_bangla(text)
-
-        if bangla:
-            (bangla_negative if negative else bangla_positive).append(entry)
+        if is_negative(entry):
+            continue  # skip negative articles entirely
+        if is_bangla(text):
+            bangla_positive.append(entry)
         else:
-            (english_negative if negative else english_positive).append(entry)
+            english_positive.append(entry)
 
-    print(f"Bangla positive: {len(bangla_positive)} | negative: {len(bangla_negative)}")
-    print(f"English positive: {len(english_positive)} | negative: {len(english_negative)}")
+    print(f"Bangla saved: {len(bangla_positive)}")
+    print(f"English saved: {len(english_positive)}")
 
-    # Write output feeds
     feeds = {
-        "bangla_positive.xml":  ("Bangla Positive News",  "Filtered positive Bangla news",   bangla_positive),
-        "bangla_negative.xml":  ("Bangla Negative News",  "Filtered negative Bangla news",    bangla_negative),
-        "english_positive.xml": ("English Positive News", "Filtered positive English news",   english_positive),
-        "english_negative.xml": ("English Negative News", "Filtered negative English news",   english_negative),
+        "bangla.xml":  ("Bangla News",  "Filtered positive Bangla news",   bangla_positive),
+        "english.xml": ("English News", "Filtered positive English news",   english_positive),
     }
 
     for filename, (title, desc, items) in feeds.items():
         fg = make_feed(title, SOURCE_URLS[0], desc, items)
         fg.rss_file(filename)
         print(f"Written: {filename} ({len(items)} items)")
-
 
 if __name__ == "__main__":
     main()
