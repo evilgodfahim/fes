@@ -29,7 +29,7 @@ SOURCE_URLS = [
     "https://evilgodfahim.github.io/tbs/articles.xml",
 ]
 MAX_ARTICLES   = 500
-MAX_AGE_HOURS  = 3
+MAX_AGE_HOURS  = 5
 GEMINI_MODEL   = "gemini-2.5-flash"
 GEMINI_BATCH   = 40   # titles per API call
 GEMINI_RETRIES = 3
