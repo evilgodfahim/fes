@@ -1,4 +1,4 @@
 feedparser
 feedgen
 requests
-google-generativeai
+google-genai
