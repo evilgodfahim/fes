@@ -26,6 +26,7 @@ MAX_AGE_HOURS  = 5
 GEMINI_MODEL   = "gemini-2.5-flash"
 GEMINI_BATCH   = 100
 GEMINI_RETRIES = 3
+SEEN_FILE      = "seen.json"
 
 # ── GEMINI PROMPT ─────────────────────────────────────────────────────────────
 # NOTE: curly braces inside the prompt are doubled {{ }} to escape Python's
@@ -166,6 +167,28 @@ def is_too_old(entry):
     if dt is None: return False
     if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
     return (datetime.now(timezone.utc) - dt) > timedelta(hours=MAX_AGE_HOURS)
+
+# ── SEEN.JSON ─────────────────────────────────────────────────────────────────
+def load_seen():
+    if not os.path.exists(SEEN_FILE):
+        return set()
+    try:
+        with open(SEEN_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        seen = set(data) if isinstance(data, list) else set()
+        print(f"[SEEN] Loaded {len(seen)} previously processed URLs from {SEEN_FILE}")
+        return seen
+    except Exception as e:
+        print(f"[WARN] Could not load {SEEN_FILE}: {e}")
+        return set()
+
+def save_seen(seen: set):
+    try:
+        with open(SEEN_FILE, "w", encoding="utf-8") as f:
+            json.dump(sorted(seen), f, indent=2)
+        print(f"[SEEN] Saved {len(seen)} URLs to {SEEN_FILE}")
+    except Exception as e:
+        print(f"[WARN] Could not save {SEEN_FILE}: {e}")
 
 # ── FETCH ─────────────────────────────────────────────────────────────────────
 def fetch_feed(url):
@@ -345,12 +368,24 @@ def main():
             deduped.append(e)
     print(f"After dedup    : {len(deduped)}")
 
-    if not deduped:
-        print("Nothing to process.")
+    # ── Skip articles already processed in a previous run ────────────────────
+    gemini_seen = load_seen()
+    unseen = [e for e in deduped if e.get('link', '') not in gemini_seen]
+    print(f"After seen.json filter: {len(unseen)} new (skipping {len(deduped) - len(unseen)})")
+
+    if not unseen:
+        print("Nothing new to process.")
         return
 
-    print(f"\n[GEMINI] Filtering {len(deduped)} articles...\n")
-    bangla_new, english_new = gemini_filter(deduped)
+    print(f"\n[GEMINI] Filtering {len(unseen)} articles...\n")
+    bangla_new, english_new = gemini_filter(unseen)
+
+    # Mark every article we just sent to Gemini as seen (regardless of KEEP/SKIP)
+    for e in unseen:
+        link = e.get('link', '')
+        if link:
+            gemini_seen.add(link)
+    save_seen(gemini_seen)
 
     print(f"\nNew Bangla  : {len(bangla_new)}")
     print(f"New English : {len(english_new)}\n")
