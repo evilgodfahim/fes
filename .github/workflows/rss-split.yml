@@ -22,7 +22,7 @@ jobs:
       - name: Run feed filter
         env:
           LU: ${{ secrets.LU }}
-        run: python rss_filter.py
+        run: python split_feed.py
 
       - name: Commit and push changes
         run: |
