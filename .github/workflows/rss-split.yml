@@ -28,6 +28,6 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add bangla.xml english.xml
+          git add bangla.xml english.xml seen.json
           git commit -m "Update feeds $(date -u '+%Y-%m-%d %H:%M UTC')" || echo "No changes"
           git push
