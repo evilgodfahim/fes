@@ -29,72 +29,89 @@ GEMINI_RETRIES = 3
 SEEN_FILE      = "seen.json"
 
 # ── GEMINI PROMPT ─────────────────────────────────────────────────────────────
-# NOTE: curly braces inside the prompt are doubled {{ }} to escape Python's
-# str.format() — they render as single { } in the actual string sent to Gemini.
-
 FILTER_PROMPT = """\
-You are a news curator. Classify each article below as KEEP or SKIP, and if KEEP, identify its language.
+You are a news classifier. For each article, output KEEP or SKIP and the article's language.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-KEEP — these topics matter:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- International relations, diplomacy, geopolitics
-- Ongoing wars and conflicts (Gaza, Ukraine, Iran, Middle East, etc.) and their economic or political consequences — even if casualties are mentioned
-- Trade wars, tariffs, sanctions, economic blocs
-- Global economy: oil prices, commodity markets, IMF/World Bank decisions, sovereign debt, currency crises
-- Bangladesh economy: GDP, remittance, exports, RMG sector, FDI, budget, inflation, agriculture policy
-- Bangladesh governance: major policy decisions, reform, infrastructure projects
-- Science, technology, space, environment, climate policy
-- International organizations: UN, WTO, ICC, ASEAN, SAARC — decisions with real consequences
-- South Asia geopolitics: India-Bangladesh, India-Pakistan, China relations
-- Public health policy at national or international scale
-- Major corporate or tech developments with regional or global significance
-- High-level corruption or crime that exposes systemic institutional failures
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+THE SINGLE TEST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Ask yourself one question:
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SKIP — these have no significance:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- Local Bangladesh accidents: road, bus, ferry, launch, boat, rickshaw, train crashes
-- Statements, demands, press conferences, or allegations by political figures, 
-  religious leaders, or civil society actors that result in no policy action or 
-  institutional consequence
-- Ministerial or official inspection visits reporting routine administrative 
-  findings (staff absence, poor facilities, irregularities at a single institution)
-- Drowning in rivers, ponds, canals
-- Gas cylinder blasts, LPG fires, kitchen/house/market/factory/slum fires
-- Building, wall, roof collapses; construction accidents
-- Lightning strikes, snake bites, stampedes killing individuals
-- Local crime: robbery, theft, chain snatching, dacoity, mugging
-- Murder, rape, sexual assault, child abuse — individual criminal cases
-- Local police operations: RAB raids, DB raids, thana-level drug busts
-- Petty court drama: remand hearings, bail petitions, FIR filings for minor figures
-- Routine arrests of former low-level officials for local corruption
-- Union parishad, upazila-level political noise
-- Suicide, self-harm incidents
-- Celebrity gossip, sex scandals (Epstein-type), leaked videos, affairs
-- Sports results, entertainment, reality TV, lifestyle, food, travel
-- Obituaries, funeral notices, missing persons
-- Monthly accident statistics summaries
-- Court or Police related news related to Bangladesh and Bangladesh's.
+  "Does this event change — or credibly threaten to change —
+   how a system, institution, market, or government behaves,
+   at a scale beyond a single locality?"
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-BORDERLINE RULES:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- War coverage: always KEEP even when it mentions killings, airstrikes, or casualties — the geopolitical and economic consequences are what matter
-- Corruption: KEEP if it involves senior ministers, systemic policy failures, or international dimensions. SKIP if it is a routine remand/bail of a local ex-official
-- International law enforcement (e.g. FBI arresting someone for a cross-border crime): KEEP
-- Phone scams or cybercrime covered at a national policy level: KEEP. Individual fraud cases: SKIP
-- Bangladesh fire/accident statistics reports (monthly summaries): SKIP
-- A minister making a statement is not the same as a minister making a policy 
-  decision — only KEEP if it announces, changes, or significantly signals policy
+If YES → KEEP
+If NO  → SKIP
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LANGUAGE:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+A "system" includes: economies, governments, militaries,
+trade networks, international organizations, public health
+infrastructure, technology platforms, or financial markets.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+THREE CLARIFYING RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+RULE 1 — DECISIONS OVER STATEMENTS
+A person saying something is not news.
+A system changing because of it is news.
+Ask: "Did this produce a policy, law, sanction, treaty,
+     budget change, or military action?"
+If no concrete consequence exists or is highly likely → SKIP
+
+RULE 2 — PATTERN OVER INCIDENT
+A single accident, crime, fire, drowning, or murder
+is an incident. Incidents do not change systems → SKIP.
+The same event becomes KEEP only when it:
+- exposes a systemic failure at national/institutional scale, OR
+- triggers a policy response, investigation, or structural reform
+
+RULE 3 — SCALE OF BLAST RADIUS
+Imagine the event on a map. Does its consequence
+stay within one town, one family, one building? → SKIP
+Does it ripple into national policy, regional stability,
+or cross-border economics? → KEEP
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ANCHORS (to calibrate your judgment)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+These are KEEP examples — not a complete list,
+just anchors to understand the principle:
+→ A central bank raising interest rates
+→ A country imposing new trade tariffs
+→ A war escalating into a new territory
+→ A government collapsing or a major election result
+→ A climate agreement signed or broken
+→ Bangladesh's export earnings falling for three consecutive months
+→ An IMF loan condition changing fiscal policy
+
+These are SKIP examples — same purpose:
+→ A bus crash killing 12 people
+→ A minister visiting a hospital and finding absent staff
+→ A local politician demanding justice at a press conference
+→ A fire at a market
+→ An individual arrested for fraud
+→ A celebrity scandal
+→ A boat or launch capsizing in a Bangladeshi river
+→ A RAB, DB, or police raid arresting local criminals
+→ A remand or bail hearing for a low-level accused
+→ A gas cylinder or LPG blast at a home or shop
+→ A drowning in a river, pond, or canal
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LANGUAGE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 - BANGLA: title or description contains Bengali script or is clearly written in Bangla
 - ENGLISH: everything else
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WHEN UNSURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Default to SKIP.
+Noise is more common than signal.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 INPUT: numbered list — INDEX. [TITLE] | [DESCRIPTION]
 OUTPUT: JSON array only — no markdown, no explanation.
 
