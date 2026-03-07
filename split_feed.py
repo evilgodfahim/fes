@@ -55,6 +55,11 @@ KEEP — these topics matter:
 SKIP — these have no significance:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 - Local Bangladesh accidents: road, bus, ferry, launch, boat, rickshaw, train crashes
+- Statements, demands, press conferences, or allegations by political figures, 
+  religious leaders, or civil society actors that result in no policy action or 
+  institutional consequence
+- Ministerial or official inspection visits reporting routine administrative 
+  findings (staff absence, poor facilities, irregularities at a single institution)
 - Drowning in rivers, ponds, canals
 - Gas cylinder blasts, LPG fires, kitchen/house/market/factory/slum fires
 - Building, wall, roof collapses; construction accidents
@@ -80,6 +85,8 @@ BORDERLINE RULES:
 - International law enforcement (e.g. FBI arresting someone for a cross-border crime): KEEP
 - Phone scams or cybercrime covered at a national policy level: KEEP. Individual fraud cases: SKIP
 - Bangladesh fire/accident statistics reports (monthly summaries): SKIP
+- A minister making a statement is not the same as a minister making a policy 
+  decision — only KEEP if it announces, changes, or significantly signals policy
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 LANGUAGE:
