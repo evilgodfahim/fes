@@ -1,13 +1,6 @@
 """
 RSS Feed Splitter — Gemini AI Filter
-=====================================
-Pipeline:
-  1. Fetch source feeds
-  2. Age-filter (MAX_AGE_HOURS)
-  3. Deduplicate by URL
-  4. Send batches to Gemini — it decides what to keep and which language
-  5. Append results to bangla.xml / english.xml (max MAX_ARTICLES, deduped)
-
+Pipeline: Fetch → Age filter → Dedup → Gemini → Append to bangla.xml / english.xml
 GitHub Actions secret: LU = Gemini API key
 """
 
@@ -21,7 +14,7 @@ import time
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone, timedelta
 
-import google.generativeai as genai
+from google import genai
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 SOURCE_URLS = [
@@ -29,89 +22,83 @@ SOURCE_URLS = [
     "https://evilgodfahim.github.io/tbs/articles.xml",
 ]
 MAX_ARTICLES   = 500
-MAX_AGE_HOURS  = 5
+MAX_AGE_HOURS  = 3
 GEMINI_MODEL   = "gemini-2.5-flash"
-GEMINI_BATCH   = 40   # titles per API call
+GEMINI_BATCH   = 40
 GEMINI_RETRIES = 3
 
 # ── GEMINI PROMPT ─────────────────────────────────────────────────────────────
-FILTER_PROMPT = """You are a news curator for a Bangladeshi competitive exam preparation platform (BCS and similar exams). Your job is to classify each article as KEEP or SKIP, and if KEEP, identify its language as BANGLA or ENGLISH.
+# NOTE: curly braces inside the prompt are doubled {{ }} to escape Python's
+# str.format() — they render as single { } in the actual string sent to Gemini.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ALWAYS KEEP — these topics have exam value:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• International relations, diplomacy, geopolitics
-• Ongoing wars and conflicts (Gaza, Ukraine, Iran, Middle East, etc.) — their causes, consequences, global impact
-• Trade wars, tariffs, sanctions, economic blocs
-• Global economy: oil prices, commodity markets, currency moves, IMF/World Bank decisions
-• Bangladesh economy: GDP, remittance, exports, RMG sector, FDI, budget, inflation, agriculture
-• Bangladesh governance: major policy decisions, reform, infrastructure, development projects
-• Science, technology, space, climate change, environment
-• International organizations: UN, WTO, ICC, ASEAN, SAARC decisions
-• South Asia geopolitics: India-Bangladesh, India-Pakistan, China relations
-• Education, public health policy (not individual cases)
-• Major corporate or tech developments with global/regional significance
+FILTER_PROMPT = """\
+You are a news curator. Classify each article below as KEEP or SKIP, and if KEEP, identify its language.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ALWAYS SKIP — no exam value:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Local Bangladesh accidents: road, bus, ferry, launch, boat, rickshaw, train crashes or overturns
-• Drowning incidents in rivers, ponds, canals
-• Gas cylinder blasts, LPG fires, kitchen/house/market/factory/slum fires
-• Building, wall, roof collapses; construction accidents
-• Lightning strikes, snake bites, floods killing individuals
-• Local Bangladesh crime: robbery, theft, chain snatching, dacoity, mugging
-• Murder, rape, sexual assault, child abuse (individual cases)
-• Local police operations: RAB raids, DB raids, thana-level crackdowns
-• Drug busts, yaba/phensedyl/ganja seizures at local level
-• Petty court drama: remand hearings, bail petitions, FIR filings against minor figures
-• Former/ex-officials' routine arrests for local corruption, money laundering of small sums
-• ACC (Anti-Corruption Commission) cases against low-profile individuals
-• Union parishad, upazila-level political drama
-• Suicide, self-harm incidents
-• Celebrity gossip: Epstein-type scandals, sex tapes, affairs, feuds
-• Reality TV, entertainment news, sports results
-• Obituaries, funeral rites, burial notices
-• Individual missing person reports
-• Local union disputes, minor strikes with no policy significance
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+KEEP — these topics matter:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- International relations, diplomacy, geopolitics
+- Ongoing wars and conflicts (Gaza, Ukraine, Iran, Middle East, etc.) and their economic or political consequences — even if casualties are mentioned
+- Trade wars, tariffs, sanctions, economic blocs
+- Global economy: oil prices, commodity markets, IMF/World Bank decisions, sovereign debt, currency crises
+- Bangladesh economy: GDP, remittance, exports, RMG sector, FDI, budget, inflation, agriculture policy
+- Bangladesh governance: major policy decisions, reform, infrastructure projects
+- Science, technology, space, environment, climate policy
+- International organizations: UN, WTO, ICC, ASEAN, SAARC — decisions with real consequences
+- South Asia geopolitics: India-Bangladesh, India-Pakistan, China relations
+- Public health policy at national or international scale
+- Major corporate or tech developments with regional or global significance
+- High-level corruption or crime that exposes systemic institutional failures
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-NUANCED RULES — read carefully:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• War reporting: KEEP. Even if an article mentions killings, airstrikes, or casualties in the context of an ongoing international conflict (Gaza, Ukraine, Iran war, etc.) — KEEP it. These have direct geopolitical and economic significance.
-• Crime involving major figures or systemic issues: KEEP if it involves senior government officials, ministers, or reveals systemic corruption/policy failures. SKIP if it's a routine remand/bail of a local ex-official.
-• Bangladesh fire/accident statistics reports (monthly summaries): SKIP — no individual incident has exam value even in aggregate form.
-• Economic losses from trade/tariff disputes: KEEP. Economic losses from a local fire: SKIP.
-• Phone scams, cybercrime at national policy level: KEEP. Individual fraud cases: SKIP.
-• Child exploitation rings with international dimension (like FBI arrest): KEEP. Local molestation case: SKIP.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SKIP — these have no significance:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Local Bangladesh accidents: road, bus, ferry, launch, boat, rickshaw, train crashes
+- Drowning in rivers, ponds, canals
+- Gas cylinder blasts, LPG fires, kitchen/house/market/factory/slum fires
+- Building, wall, roof collapses; construction accidents
+- Lightning strikes, snake bites, stampedes killing individuals
+- Local crime: robbery, theft, chain snatching, dacoity, mugging
+- Murder, rape, sexual assault, child abuse — individual criminal cases
+- Local police operations: RAB raids, DB raids, thana-level drug busts
+- Petty court drama: remand hearings, bail petitions, FIR filings for minor figures
+- Routine arrests of former low-level officials for local corruption
+- Union parishad, upazila-level political noise
+- Suicide, self-harm incidents
+- Celebrity gossip, sex scandals (Epstein-type), leaked videos, affairs
+- Sports results, entertainment, reality TV, lifestyle, food, travel
+- Obituaries, funeral notices, missing persons
+- Monthly accident statistics summaries
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LANGUAGE DETECTION:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• BANGLA: title or description contains Bengali script (Unicode range \\u0980-\\u09FF) or the article is clearly written in Bangla
-• ENGLISH: everything else
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BORDERLINE RULES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- War coverage: always KEEP even when it mentions killings, airstrikes, or casualties — the geopolitical and economic consequences are what matter
+- Corruption: KEEP if it involves senior ministers, systemic policy failures, or international dimensions. SKIP if it is a routine remand/bail of a local ex-official
+- International law enforcement (e.g. FBI arresting someone for a cross-border crime): KEEP
+- Phone scams or cybercrime covered at a national policy level: KEEP. Individual fraud cases: SKIP
+- Bangladesh fire/accident statistics reports (monthly summaries): SKIP
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-INPUT FORMAT:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-A numbered list of articles. Each entry has:
-  INDEX. [TITLE] | [DESCRIPTION SNIPPET]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LANGUAGE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- BANGLA: title or description contains Bengali script or is clearly written in Bangla
+- ENGLISH: everything else
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OUTPUT FORMAT — strictly JSON, nothing else:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INPUT: numbered list — INDEX. [TITLE] | [DESCRIPTION]
+OUTPUT: JSON array only — no markdown, no explanation.
+
+Format exactly:
 [
-  {"index": 0, "decision": "KEEP", "lang": "ENGLISH"},
-  {"index": 1, "decision": "SKIP"},
-  {"index": 2, "decision": "KEEP", "lang": "BANGLA"}
+  {{"index": 0, "decision": "KEEP", "lang": "ENGLISH"}},
+  {{"index": 1, "decision": "SKIP"}},
+  {{"index": 2, "decision": "KEEP", "lang": "BANGLA"}}
 ]
 
-Rules:
-- Output ONLY the JSON array. No markdown, no explanation, no preamble.
-- Only include "lang" field when decision is "KEEP".
-- Every input index must appear in the output exactly once.
+Every input index must appear exactly once. Only include "lang" when decision is KEEP.
 
-Articles to classify:
+Articles:
 {articles}
 """
 
@@ -125,13 +112,10 @@ def extract_thumb_from_html(html):
     return m.group(1) if m else None
 
 def get_thumbnail(entry):
-    # 1. RSS <enclosure> — TBS feed uses this
     for enc in (entry.get('enclosures') or []):
         href = enc.get('href') or enc.get('url')
         if href and 'image' in (enc.get('type') or '').lower():
             return href
-
-    # 2. media:thumbnail
     mt = entry.get('media_thumbnail')
     if mt:
         if isinstance(mt, list) and mt:
@@ -139,8 +123,6 @@ def get_thumbnail(entry):
             if url: return url
         elif isinstance(mt, dict) and mt.get('url'):
             return mt['url']
-
-    # 3. media:content
     mc = entry.get('media_content')
     if mc:
         if isinstance(mc, list) and mc:
@@ -148,29 +130,22 @@ def get_thumbnail(entry):
             if url: return url
         elif isinstance(mc, dict) and mc.get('url'):
             return mc['url']
-
-    # 4. links with image type
     for lnk in (entry.get('links') or []):
         href = lnk.get('href') or lnk.get('url')
         rel  = (lnk.get('rel') or '').lower()
         typ  = (lnk.get('type') or '').lower()
         if href and ((rel == 'enclosure' and 'image' in typ) or rel == 'thumbnail' or 'image' in typ):
             return href
-
-    # 5. misc dict keys
     for key in ('thumbnail', 'image', 'enclosure'):
         val = entry.get(key)
         if isinstance(val, dict) and val.get('url'): return val['url']
         if isinstance(val, str) and val:             return val
-
-    # 6. img tag inside summary/description/content
     for field in ('summary', 'description', 'content'):
         text = entry.get(field)
         if isinstance(text, list):
             text = text[0].get('value', '') if text else ''
         thumb = extract_thumb_from_html(text or '')
         if thumb: return thumb
-
     return None
 
 # ── DATE HELPERS ──────────────────────────────────────────────────────────────
@@ -204,18 +179,28 @@ def fetch_feed(url):
         return []
 
 # ── GEMINI ────────────────────────────────────────────────────────────────────
+def extract_json_array(text):
+    text = re.sub(r'```(?:json)?', '', text).replace('```', '').strip()
+    match = re.search(r'\[.*\]', text, flags=re.DOTALL)
+    if not match:
+        return None
+    arr_text = match.group(0)
+    try:
+        return json.loads(arr_text)
+    except Exception:
+        fixed = re.sub(r',\s*]', ']', arr_text)
+        try:
+            return json.loads(fixed)
+        except Exception:
+            return None
+
 def call_gemini(articles_batch):
-    """
-    articles_batch: list of dicts with keys: index, title, description
-    Returns: list of {index, decision, lang?}
-    """
     api_key = os.environ.get("LU")
     if not api_key:
-        print("[WARN] No Gemini API key found in env var LU — skipping AI filter")
+        print("[WARN] No API key in LU — passing through unfiltered")
         return [{"index": a["index"], "decision": "KEEP", "lang": "ENGLISH"} for a in articles_batch]
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(GEMINI_MODEL)
+    client = genai.Client(api_key=api_key)
 
     lines = []
     for a in articles_batch:
@@ -227,29 +212,24 @@ def call_gemini(articles_batch):
 
     for attempt in range(GEMINI_RETRIES):
         try:
-            response = model.generate_content(prompt)
-            raw = (getattr(response, "text", None) or "").strip()
-            # Strip markdown code fences if present
-            raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
-            raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE)
-            raw = raw.strip()
-            result = json.loads(raw)
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+            )
+            response_text = getattr(response, "text", None) or str(response)
+            result = extract_json_array(response_text)
             if isinstance(result, list):
                 return result
+            print(f"[GEMINI] Attempt {attempt+1}: unexpected response format")
         except Exception as e:
             print(f"[GEMINI] Attempt {attempt+1} failed: {e}")
-            if attempt < GEMINI_RETRIES - 1:
-                time.sleep(3)
+        if attempt < GEMINI_RETRIES - 1:
+            time.sleep(3)
 
     print("[GEMINI] All retries failed — passing batch through unfiltered")
     return [{"index": a["index"], "decision": "KEEP", "lang": "ENGLISH"} for a in articles_batch]
 
 def gemini_filter(entries):
-    """
-    Run entries through Gemini in batches.
-    Returns: (bangla_entries, english_entries)
-    """
-    # Build flat list with stable indices
     batch_input = []
     for i, entry in enumerate(entries):
         title = entry.get('title', '') or ''
@@ -259,23 +239,23 @@ def gemini_filter(entries):
     decisions = {}
     for start in range(0, len(batch_input), GEMINI_BATCH):
         chunk = batch_input[start:start + GEMINI_BATCH]
-        print(f"[GEMINI] Sending batch {start//GEMINI_BATCH + 1} ({len(chunk)} articles)...")
+        print(f"[GEMINI] Batch {start // GEMINI_BATCH + 1}: {len(chunk)} articles...")
         results = call_gemini(chunk)
         for r in results:
             if isinstance(r, dict) and 'index' in r:
                 decisions[r['index']] = r
-        # Small delay between batches to avoid rate limits
         if start + GEMINI_BATCH < len(batch_input):
             time.sleep(1)
 
     bangla, english = [], []
     for i, entry in enumerate(entries):
         d = decisions.get(i, {})
+        title = entry.get('title', '')[:80]
         if d.get('decision') != 'KEEP':
-            print(f"  [SKIP] {entry.get('title', '')[:80]}")
+            print(f"  [SKIP] {title}")
             continue
-        lang = d.get('lang', 'ENGLISH').upper()
-        print(f"  [KEEP/{lang}] {entry.get('title', '')[:80]}")
+        lang = (d.get('lang') or 'ENGLISH').upper()
+        print(f"  [KEEP/{lang}] {title}")
         if lang == 'BANGLA':
             bangla.append(entry)
         else:
@@ -309,7 +289,6 @@ def save_feed(filename, title, feed_link, description, new_entries, existing_ent
             seen_links.add(link)
             merged.append(e)
             added += 1
-
     merged.extend(existing_entries)
     merged = merged[:MAX_ARTICLES]
 
@@ -332,7 +311,6 @@ def save_feed(filename, title, feed_link, description, new_entries, existing_ent
         thumb = get_thumbnail(entry)
         if thumb and not IMG_SRC_RE.search(summary):
             summary = f'<img src="{thumb}" alt="thumbnail" />' + summary
-
         fe.description(summary)
 
         if thumb:
@@ -349,18 +327,14 @@ def save_feed(filename, title, feed_link, description, new_entries, existing_ent
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
-    # 1. Fetch
     all_entries = []
     for url in SOURCE_URLS:
         all_entries.extend(fetch_feed(url))
+    print(f"\nTotal fetched  : {len(all_entries)}")
 
-    print(f"\nTotal fetched: {len(all_entries)}")
-
-    # 2. Age filter
     fresh = [e for e in all_entries if not is_too_old(e)]
     print(f"After age filter ({MAX_AGE_HOURS}h): {len(fresh)}")
 
-    # 3. Deduplicate by URL (across sources)
     seen_urls = set()
     deduped = []
     for e in fresh:
@@ -368,27 +342,25 @@ def main():
         if link and link not in seen_urls:
             seen_urls.add(link)
             deduped.append(e)
-    print(f"After dedup: {len(deduped)}")
+    print(f"After dedup    : {len(deduped)}")
 
     if not deduped:
         print("Nothing to process.")
         return
 
-    # 4. Gemini filter
     print(f"\n[GEMINI] Filtering {len(deduped)} articles...\n")
     bangla_new, english_new = gemini_filter(deduped)
 
     print(f"\nNew Bangla  : {len(bangla_new)}")
     print(f"New English : {len(english_new)}\n")
 
-    # 5. Append to XML feeds
     feeds = {
         "bangla.xml":  ("Bangla News",  "Filtered Bangla news",  bangla_new),
         "english.xml": ("English News", "Filtered English news", english_new),
     }
-    for filename, (title, desc, new_items) in feeds.items():
+    for filename, (ftitle, desc, new_items) in feeds.items():
         existing, seen = load_existing(filename)
-        save_feed(filename, title, SOURCE_URLS[0], desc, new_items, existing, seen)
+        save_feed(filename, ftitle, SOURCE_URLS[0], desc, new_items, existing, seen)
 
 if __name__ == "__main__":
     main()
