@@ -69,6 +69,7 @@ SKIP — these have no significance:
 - Sports results, entertainment, reality TV, lifestyle, food, travel
 - Obituaries, funeral notices, missing persons
 - Monthly accident statistics summaries
+- Court or Police related news related to Bangladesh and Bangladesh's.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 BORDERLINE RULES:
