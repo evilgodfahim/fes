@@ -2,8 +2,8 @@ name: Update RSS Feeds
 
 on:
   schedule:
-    - cron: "0 * * * *"   # every 30 mins
-  workflow_dispatch:          # allow manual run
+    - cron: "0 * * * *"   # every hour
+  workflow_dispatch:        # allow manual run
 
 jobs:
   update:
@@ -19,13 +19,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run feed splitter
-        run: python split_feed.py
+      - name: Run feed filter
+        env:
+          LU: ${{ secrets.LU }}
+        run: python rss_filter.py
 
       - name: Commit and push changes
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add bangla.xml english.xml
-          git commit -m "Update feeds" || echo "No changes to commit"
+          git commit -m "Update feeds $(date -u '+%Y-%m-%d %H:%M UTC')" || echo "No changes"
           git push
