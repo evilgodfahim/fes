@@ -24,7 +24,7 @@ SOURCE_URLS = [
 MAX_ARTICLES   = 500
 MAX_AGE_HOURS  = 3
 GEMINI_MODEL   = "gemini-2.5-flash"
-GEMINI_BATCH   = 40
+GEMINI_BATCH   = 100
 GEMINI_RETRIES = 3
 
 # ── GEMINI PROMPT ─────────────────────────────────────────────────────────────
